@@ -65,6 +65,21 @@ pub fn build(b: *std.Build) void {
         .root_module = exe_mod,
     });
 
+    const zglfw = b.dependency("zglfw", .{
+        .target = target,
+    });
+    exe.root_module.addImport("zglfw", zglfw.module("root"));
+    exe.linkLibrary(zglfw.artifact("glfw"));
+
+    @import("zgpu").addLibraryPathsTo(exe);
+
+    const zgpu = b.dependency("zgpu", .{});
+    exe.root_module.addImport("zgpu", zgpu.module("root"));
+
+    if (target.result.os.tag != .emscripten) {
+        exe.linkLibrary(zgpu.artifact("zdawn"));
+    }
+
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default
     // step when running `zig build`).
