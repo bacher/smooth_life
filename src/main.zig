@@ -85,10 +85,11 @@ const Uniforms = extern struct {
 const DemoState = struct {
     gctx: *zgpu.GraphicsContext,
 
+    simple_pipeline: zgpu.RenderPipelineHandle = .{},
+    simple_bind_group: zgpu.BindGroupHandle,
+
     pipeline: zgpu.RenderPipelineHandle = .{},
     bind_group: zgpu.BindGroupHandle,
-
-    simple_pipeline: zgpu.RenderPipelineHandle = .{},
 
     vertex_buffer: zgpu.BufferHandle,
     index_buffer: zgpu.BufferHandle,
@@ -121,6 +122,11 @@ fn create(allocator: std.mem.Allocator, window: *zglfw.Window) !*DemoState {
     // var arena_state = std.heap.ArenaAllocator.init(allocator);
     // defer arena_state.deinit();
     // const arena = arena_state.allocator();
+
+    const simple_bind_group_layout = gctx.createBindGroupLayout(&.{
+        zgpu.bufferEntry(0, .{ .vertex = true, .fragment = true }, .uniform, true, 0),
+    });
+    defer gctx.releaseResource(simple_bind_group_layout);
 
     const bind_group_layout = gctx.createBindGroupLayout(&.{
         zgpu.bufferEntry(0, .{ .vertex = true, .fragment = true }, .uniform, true, 0),
@@ -182,6 +188,10 @@ fn create(allocator: std.mem.Allocator, window: *zglfw.Window) !*DemoState {
     // Create a sampler.
     const sampler = gctx.createSampler(.{});
 
+    const simple_bind_group = gctx.createBindGroup(simple_bind_group_layout, &.{
+        .{ .binding = 0, .buffer_handle = gctx.uniforms.buffer, .offset = 0, .size = 256 },
+    });
+
     const bind_group = gctx.createBindGroup(bind_group_layout, &.{
         .{ .binding = 0, .buffer_handle = gctx.uniforms.buffer, .offset = 0, .size = 256 },
         .{ .binding = 1, .texture_view_handle = texture_view },
@@ -191,6 +201,7 @@ fn create(allocator: std.mem.Allocator, window: *zglfw.Window) !*DemoState {
     const demo = try allocator.create(DemoState);
     demo.* = .{
         .gctx = gctx,
+        .simple_bind_group = simple_bind_group,
         .bind_group = bind_group,
         .vertex_buffer = vertex_buffer,
         .index_buffer = index_buffer,
@@ -213,6 +224,13 @@ fn create(allocator: std.mem.Allocator, window: *zglfw.Window) !*DemoState {
 
     // (Async) Create a render pipeline.
     {
+        // simple
+        const simple_pipeline_layout = gctx.createPipelineLayout(&.{
+            simple_bind_group_layout,
+        });
+        defer gctx.releaseResource(simple_pipeline_layout);
+
+        // regular
         const pipeline_layout = gctx.createPipelineLayout(&.{
             bind_group_layout,
         });
@@ -232,7 +250,8 @@ fn create(allocator: std.mem.Allocator, window: *zglfw.Window) !*DemoState {
             .attributes = &vertex_attributes,
         }};
 
-        { // Create a simple render pipeline.
+        // Create a simple render pipeline.
+        {
             const vs_module = zgpu.createWgslShaderModule(gctx.device, wgsl_simple_vs, "vs");
             defer vs_module.release();
 
@@ -261,13 +280,14 @@ fn create(allocator: std.mem.Allocator, window: *zglfw.Window) !*DemoState {
 
             gctx.createRenderPipelineAsync(
                 allocator,
-                pipeline_layout,
+                simple_pipeline_layout,
                 pipeline_descriptor,
                 &demo.simple_pipeline,
             );
         }
 
-        { // Create a final render pipeline.
+        // Create a final render pipeline.
+        {
             const vs_module = zgpu.createWgslShaderModule(gctx.device, wgsl_vs, "vs");
             defer vs_module.release();
 
@@ -329,6 +349,7 @@ fn draw(demo: *DemoState) void {
             const ib_info = gctx.lookupResourceInfo(demo.index_buffer) orelse break :pass;
             const simple_pipeline = gctx.lookupResource(demo.simple_pipeline) orelse break :pass;
             const pipeline = gctx.lookupResource(demo.pipeline) orelse break :pass;
+            const simple_bind_group = gctx.lookupResource(demo.simple_bind_group) orelse break :pass;
             const bind_group = gctx.lookupResource(demo.bind_group) orelse break :pass;
             const texture_view = gctx.lookupResource(demo.texture_view) orelse break :pass;
 
@@ -360,7 +381,7 @@ fn draw(demo: *DemoState) void {
                     .mip_level = @as(f32, @floatFromInt(demo.mip_level)),
                 };
 
-                pass.setBindGroup(0, bind_group, &.{mem.offset});
+                pass.setBindGroup(0, simple_bind_group, &.{mem.offset});
 
                 pass.drawIndexed(6, 1, 0, 0, 0);
             }
