@@ -5,6 +5,3 @@ zig-out/
 tmp/
 *.DS_Store
 .idea/
-*.png
-!content/**/*.png
-

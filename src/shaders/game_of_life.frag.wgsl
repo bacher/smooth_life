@@ -7,8 +7,6 @@ struct Uniforms {
 @group(0) @binding(1) var image: texture_2d<f32>;
 @group(0) @binding(2) var image_sampler: sampler;
 
-const step = 0.0016666666666666668;
-
 @fragment fn main(
     @location(0) uv: vec2<f32>,
 ) -> @location(0) vec4<f32> {
