@@ -12,22 +12,30 @@ const step = 0.0016666666666666668;
 @fragment fn main(
     @location(0) uv: vec2<f32>,
 ) -> @location(0) vec4<f32> {
-    // return vec4(1.0, 0.0, 0.0, 1.0);
-    // return textureSample(image, image_sampler, uv) + 0.002;
+    // dpdx and dpdy work only when window size equals to the texture size.
+    // let step_x = dpdx(uv.x);
+    // let step_y = dpdy(uv.y);
+    // let step_x = uniforms.frag_step.x;
+    // let step_y = uniforms.frag_step.y;
 
-    let step_x = uniforms.frag_step.x;
-    let step_y = uniforms.frag_step.y;
+    let texture_size = textureDimensions(image, 0);
 
-    let cell = textureSample(image, image_sampler, uv).r;
+    let x = u32(uv.x * f32(texture_size.x));
+    let y = u32(uv.y * f32(texture_size.y));
+
+    // let cell = textureSample(image, image_sampler, uv).r;
+    let cell = textureLoad(image, vec2(x, y), 0).r;
+
     let neighbours =
-        textureSample(image, image_sampler, uv + vec2(-step_x, -step_y)).r +
-        textureSample(image, image_sampler, uv + vec2( 0,      -step_y)).r +
-        textureSample(image, image_sampler, uv + vec2( step_x, -step_y)).r +
-        textureSample(image, image_sampler, uv + vec2(-step_x,  0     )).r +
-        textureSample(image, image_sampler, uv + vec2( step_x,  0     )).r +
-        textureSample(image, image_sampler, uv + vec2(-step_x,  step_y)).r +
-        textureSample(image, image_sampler, uv + vec2( 0,       step_y)).r +
-        textureSample(image, image_sampler, uv + vec2( step_x,  step_y)).r;
+        // textureSample(image, image_sampler, uv + vec2(-step_x, -step_y)).r +
+        textureLoad(image, vec2(x - 1, y - 1), 0).r +
+        textureLoad(image, vec2(x,     y - 1), 0).r +
+        textureLoad(image, vec2(x + 1, y - 1), 0).r +
+        textureLoad(image, vec2(x - 1, y    ), 0).r +
+        textureLoad(image, vec2(x + 1, y    ), 0).r +
+        textureLoad(image, vec2(x - 1, y + 1), 0).r +
+        textureLoad(image, vec2(x,     y + 1), 0).r +
+        textureLoad(image, vec2(x + 1, y + 1), 0).r;
 
     return vec4(
         select(
