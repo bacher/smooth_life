@@ -4,100 +4,11 @@ const zglfw = @import("zglfw");
 const zgpu = @import("zgpu");
 const wgpu = zgpu.wgpu;
 
-// WGSL Simple shader
-// zig fmt: off
-const wgsl_simple_vs =
-    \\  struct Uniforms {
-    \\      aspect_ratio: f32,
-    \\      mip_level: f32,
-    \\  }
-    \\  @group(0) @binding(0) var<uniform> uniforms: Uniforms;
-    \\
-    \\  struct VertexOut {
-    \\      @builtin(position) position_clip: vec4<f32>,
-    \\      @location(0) uv: vec2<f32>,
-    \\  }
-    \\  @vertex fn main(
-    \\      @location(0) position: vec2<f32>,
-    \\      @location(1) uv: vec2<f32>,
-    \\  ) -> VertexOut {
-    \\      let p = vec2(position.x / uniforms.aspect_ratio, position.y);
-    \\      var output: VertexOut;
-    \\      output.position_clip = vec4(p, 0.0, 1.0);
-    \\      output.uv = uv;
-    \\      return output;
-    \\  }
-;
-const wgsl_simple_fs =
-    \\  const step = 0.0016666666666666668;
-    \\  @group(0) @binding(1) var image: texture_2d<f32>;
-    \\  @group(0) @binding(2) var image_sampler: sampler;
-    \\  @fragment fn main(
-    \\      @location(0) uv: vec2<f32>,
-    \\  ) -> @location(0) vec4<f32> {
-    \\      // return vec4(1.0, 0.0, 0.0, 1.0);
-    \\      // return textureSample(image, image_sampler, uv) + 0.002;
-    \\
-    \\      let cell = textureSample(image, image_sampler, uv).r;
-    \\      let neighbours =
-    \\          textureSample(image, image_sampler, uv + vec2(-step, -step)).r +
-    \\          textureSample(image, image_sampler, uv + vec2( 0,    -step)).r +
-    \\          textureSample(image, image_sampler, uv + vec2( step, -step)).r +
-    \\          textureSample(image, image_sampler, uv + vec2(-step,  0   )).r +
-    \\          textureSample(image, image_sampler, uv + vec2( step,  0   )).r +
-    \\          textureSample(image, image_sampler, uv + vec2(-step,  step)).r +
-    \\          textureSample(image, image_sampler, uv + vec2( 0,     step)).r +
-    \\          textureSample(image, image_sampler, uv + vec2( step,  step)).r;
-    \\
-    \\      return vec4(
-    \\          select(
-    \\              0.0,
-    \\              1.0,
-    \\              (cell == 0.0 && neighbours == 3.0) ||
-    \\              (cell == 1.0 && neighbours >= 2.0 && neighbours <= 3.0)
-    \\              ),
-    \\          0.0,
-    \\          0.0,
-    \\          1.0,
-    \\      );
-    \\  }
-;
-// zig fmt: on
+const wgsl_simple_vs = @embedFile("shaders/game_of_life.vert.wgsl");
+const wgsl_simple_fs = @embedFile("shaders/game_of_life.frag.wgsl");
 
-// zig fmt: off
-const wgsl_common =
-\\  struct Uniforms {
-\\      aspect_ratio: f32,
-\\      mip_level: f32,
-\\  }
-\\  @group(0) @binding(0) var<uniform> uniforms: Uniforms;
-;
-const wgsl_vs = wgsl_common ++
-    \\  struct VertexOut {
-    \\      @builtin(position) position_clip: vec4<f32>,
-    \\      @location(0) uv: vec2<f32>,
-    \\  }
-    \\  @vertex fn main(
-    \\      @location(0) position: vec2<f32>,
-    \\      @location(1) uv: vec2<f32>,
-    \\  ) -> VertexOut {
-    \\      let p = vec2(position.x / uniforms.aspect_ratio, position.y);
-    \\      var output: VertexOut;
-    \\      output.position_clip = vec4(p, 0.0, 1.0);
-    \\      output.uv = uv;
-    \\      return output;
-    \\  }
-;
-const wgsl_fs = wgsl_common ++
-    \\  @group(0) @binding(1) var image: texture_2d<f32>;
-    \\  @group(0) @binding(2) var image_sampler: sampler;
-    \\  @fragment fn main(
-    \\      @location(0) uv: vec2<f32>,
-    \\  ) -> @location(0) vec4<f32> {
-    \\      return textureSample(image, image_sampler, uv).rrra;
-    \\  }
-;
-// zig fmt: on
+const wgsl_vs = @embedFile("shaders/output.vert.wgsl");
+const wgsl_fs = @embedFile("shaders/output.frag.wgsl");
 
 const Vertex = extern struct {
     position: [2]f32,
