@@ -29,13 +29,37 @@ const wgsl_simple_vs =
     \\  }
 ;
 const wgsl_simple_fs =
+    \\  const step = 0.0016666666666666668;
     \\  @group(0) @binding(1) var image: texture_2d<f32>;
     \\  @group(0) @binding(2) var image_sampler: sampler;
     \\  @fragment fn main(
     \\      @location(0) uv: vec2<f32>,
     \\  ) -> @location(0) vec4<f32> {
     \\      // return vec4(1.0, 0.0, 0.0, 1.0);
-    \\      return textureSample(image, image_sampler, uv) + 0.002;
+    \\      // return textureSample(image, image_sampler, uv) + 0.002;
+    \\
+    \\      let cell = textureSample(image, image_sampler, uv).r;
+    \\      let neighbours =
+    \\          textureSample(image, image_sampler, uv + vec2(-step, -step)).r +
+    \\          textureSample(image, image_sampler, uv + vec2( 0,    -step)).r +
+    \\          textureSample(image, image_sampler, uv + vec2( step, -step)).r +
+    \\          textureSample(image, image_sampler, uv + vec2(-step,  0   )).r +
+    \\          textureSample(image, image_sampler, uv + vec2( step,  0   )).r +
+    \\          textureSample(image, image_sampler, uv + vec2(-step,  step)).r +
+    \\          textureSample(image, image_sampler, uv + vec2( 0,     step)).r +
+    \\          textureSample(image, image_sampler, uv + vec2( step,  step)).r;
+    \\
+    \\      return vec4(
+    \\          select(
+    \\              0.0,
+    \\              1.0,
+    \\              (cell == 0.0 && neighbours == 3.0) ||
+    \\              (cell == 1.0 && neighbours >= 2.0 && neighbours <= 3.0)
+    \\              ),
+    \\          0.0,
+    \\          0.0,
+    \\          1.0,
+    \\      );
     \\  }
 ;
 // zig fmt: on
@@ -70,7 +94,7 @@ const wgsl_fs = wgsl_common ++
     \\  @fragment fn main(
     \\      @location(0) uv: vec2<f32>,
     \\  ) -> @location(0) vec4<f32> {
-    \\      return textureSampleLevel(image, image_sampler, uv, uniforms.mip_level);
+    \\      return textureSample(image, image_sampler, uv).rrra;
     \\  }
 ;
 // zig fmt: on
@@ -138,10 +162,10 @@ fn create(allocator: std.mem.Allocator, window: *zglfw.Window) !*DemoState {
 
     // Create a vertex buffer.
     const vertex_data = [_]Vertex{
-        .{ .position = [2]f32{ -0.99, 0.99 }, .uv = [2]f32{ 0.0, 0.0 } },
-        .{ .position = [2]f32{ 0.99, 0.99 }, .uv = [2]f32{ 1.0, 0.0 } },
-        .{ .position = [2]f32{ 0.99, -0.99 }, .uv = [2]f32{ 1.0, 1.0 } },
-        .{ .position = [2]f32{ -0.99, -0.99 }, .uv = [2]f32{ 0.0, 1.0 } },
+        .{ .position = [2]f32{ -1.0, 1.0 }, .uv = [2]f32{ 0.0, 0.0 } },
+        .{ .position = [2]f32{ 1.0, 1.0 }, .uv = [2]f32{ 1.0, 0.0 } },
+        .{ .position = [2]f32{ 1.0, -1.0 }, .uv = [2]f32{ 1.0, 1.0 } },
+        .{ .position = [2]f32{ -1.0, -1.0 }, .uv = [2]f32{ 0.0, 1.0 } },
     };
     const vertex_buffer = gctx.createBuffer(.{
         .usage = .{ .copy_dst = true, .vertex = true },
@@ -169,7 +193,7 @@ fn create(allocator: std.mem.Allocator, window: *zglfw.Window) !*DemoState {
             .height = 600,
             .depth_or_array_layers = 1,
         },
-        .format = .bgra8_unorm,
+        .format = .rgba8_unorm,
         // Attachment can't have mip levels
         // .mip_level_count = math.log2_int(u32, 600) + 1,
     });
@@ -187,22 +211,25 @@ fn create(allocator: std.mem.Allocator, window: *zglfw.Window) !*DemoState {
             .height = 600,
             .depth_or_array_layers = 1,
         },
-        .format = .bgra8_unorm,
+        .format = .rgba8_unorm,
         // Attachment can't have mip levels
         // .mip_level_count = math.log2_int(u32, 600) + 1,
     });
     const texture_view_2 = gctx.createTextureView(texture_2, .{});
 
-    // gctx.queue.writeTexture(
-    //     .{ .texture = gctx.lookupResource(texture).? },
-    //     .{
-    //         .bytes_per_row = image.bytes_per_row,
-    //         .rows_per_image = image.height,
-    //     },
-    //     .{ .width = image.width, .height = image.height },
-    //     u8,
-    //     image.data,
-    // );
+    const data = try generate_starting_texture_data(allocator);
+    defer allocator.free(data);
+
+    gctx.queue.writeTexture(
+        .{ .texture = gctx.lookupResource(texture_2).? },
+        .{
+            .bytes_per_row = 600 * 4,
+            .rows_per_image = 600,
+        },
+        .{ .width = 600, .height = 600 },
+        u8,
+        data,
+    );
 
     // Create a sampler.
     const sampler = gctx.createSampler(.{});
@@ -258,6 +285,9 @@ fn create(allocator: std.mem.Allocator, window: *zglfw.Window) !*DemoState {
         });
         defer gctx.releaseResource(pipeline_layout);
 
+        const texture_color_targets = [_]wgpu.ColorTargetState{.{
+            .format = .rgba8_unorm,
+        }};
         const color_targets = [_]wgpu.ColorTargetState{.{
             .format = zgpu.GraphicsContext.swapchain_format,
         }};
@@ -272,7 +302,7 @@ fn create(allocator: std.mem.Allocator, window: *zglfw.Window) !*DemoState {
             .attributes = &vertex_attributes,
         }};
 
-        // Create a simple render pipeline.
+        // Create a texture render pipeline.
         {
             const vs_module = zgpu.createWgslShaderModule(gctx.device, wgsl_simple_vs, "vs");
             defer vs_module.release();
@@ -295,8 +325,8 @@ fn create(allocator: std.mem.Allocator, window: *zglfw.Window) !*DemoState {
                 .fragment = &.{
                     .module = fs_module,
                     .entry_point = "main",
-                    .target_count = color_targets.len,
-                    .targets = &color_targets,
+                    .target_count = texture_color_targets.len,
+                    .targets = &texture_color_targets,
                 },
             };
 
@@ -481,4 +511,30 @@ pub fn main() !void {
         zglfw.pollEvents();
         draw(demo);
     }
+}
+
+fn generate_starting_texture_data(allocator: std.mem.Allocator) ![]u8 {
+    const data = try allocator.alloc(u8, 600 * 600 * 4);
+
+    var y: usize = 0;
+    while (y < 600) : (y += 1) {
+        var x: usize = 0;
+        while (x < 600) : (x += 1) {
+            const offset = (y * 600 + x) * 4;
+
+            if (x >= 200 and x < 400 and y >= 250 and y < 350) {
+                data[offset] = 255;
+                data[offset + 1] = 0;
+                data[offset + 2] = 0;
+                data[offset + 3] = 255;
+            } else {
+                data[offset] = 0;
+                data[offset + 1] = 0;
+                data[offset + 2] = 0;
+                data[offset + 3] = 255;
+            }
+        }
+    }
+
+    return data;
 }
