@@ -25,7 +25,9 @@ const Vertex = extern struct {
 
 const Uniforms = extern struct {
     aspect_ratio: f32,
-    frag_step: [2]f32,
+    // "frag_step" in the shader definition defined as vec2<f32>, which have aligment 8 bytes.
+    // @sizeOf([2]f32) == 8
+    frag_step: [2]f32 align(@sizeOf([2]f32)),
 };
 
 const DemoState = struct {

@@ -16,7 +16,7 @@ const step = 0.0016666666666666668;
     // return textureSample(image, image_sampler, uv) + 0.002;
 
     let step_x = uniforms.frag_step.x;
-    let step_y = uniforms.frag_step.x;
+    let step_y = uniforms.frag_step.y;
 
     let cell = textureSample(image, image_sampler, uv).r;
     let neighbours =
