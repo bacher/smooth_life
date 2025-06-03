@@ -1,7 +1,8 @@
 struct Uniforms {
     aspect_ratio: f32,
-    mip_level: f32,
+    frag_step: vec2<f32>,
 }
+
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
 @group(0) @binding(1) var image: texture_2d<f32>;
 @group(0) @binding(2) var image_sampler: sampler;

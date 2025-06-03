@@ -4,6 +4,14 @@ const zglfw = @import("zglfw");
 const zgpu = @import("zgpu");
 const wgpu = zgpu.wgpu;
 
+const TEXTURE_WIDTH = 600;
+const TEXTURE_HEIGHT = 600;
+
+const frag_step: [2]f32 = .{
+    1.0 / @as(f32, @floatFromInt(TEXTURE_WIDTH)),
+    1.0 / @as(f32, @floatFromInt(TEXTURE_HEIGHT)),
+};
+
 const wgsl_simple_vs = @embedFile("shaders/game_of_life.vert.wgsl");
 const wgsl_simple_fs = @embedFile("shaders/game_of_life.frag.wgsl");
 
@@ -17,7 +25,7 @@ const Vertex = extern struct {
 
 const Uniforms = extern struct {
     aspect_ratio: f32,
-    mip_level: f32,
+    frag_step: [2]f32,
 };
 
 const DemoState = struct {
@@ -36,8 +44,6 @@ const DemoState = struct {
     },
 
     sampler: zgpu.SamplerHandle,
-
-    mip_level: i32 = 0,
 
     current_frame: u32 = 0,
 };
@@ -92,57 +98,26 @@ fn create(allocator: std.mem.Allocator, window: *zglfw.Window) !*DemoState {
     });
     gctx.queue.writeBuffer(gctx.lookupResource(index_buffer).?, 0, u16, index_data[0..]);
 
-    // Create a texture 1.
-    const texture_1 = gctx.createTexture(.{
-        .usage = .{
-            .texture_binding = true,
-            .copy_dst = true,
-            .render_attachment = true,
-        },
-        .size = .{
-            .width = 600,
-            .height = 600,
-            .depth_or_array_layers = 1,
-        },
-        .format = .rgba8_unorm,
-        // Attachment can't have mip levels
-        // .mip_level_count = math.log2_int(u32, 600) + 1,
-    });
+    const texture_1 = createDataTexture(gctx);
     const texture_view_1 = gctx.createTextureView(texture_1, .{});
 
-    // Create a texture 2.
-    const texture_2 = gctx.createTexture(.{
-        .usage = .{
-            .texture_binding = true,
-            .copy_dst = true,
-            .render_attachment = true,
-        },
-        .size = .{
-            .width = 600,
-            .height = 600,
-            .depth_or_array_layers = 1,
-        },
-        .format = .rgba8_unorm,
-        // Attachment can't have mip levels
-        // .mip_level_count = math.log2_int(u32, 600) + 1,
-    });
+    const texture_2 = createDataTexture(gctx);
     const texture_view_2 = gctx.createTextureView(texture_2, .{});
 
-    const data = try generate_starting_texture_data(allocator);
+    const data = try generateStartingTextureData(allocator);
     defer allocator.free(data);
 
     gctx.queue.writeTexture(
         .{ .texture = gctx.lookupResource(texture_2).? },
         .{
-            .bytes_per_row = 600 * 4,
-            .rows_per_image = 600,
+            .bytes_per_row = TEXTURE_WIDTH * 4,
+            .rows_per_image = TEXTURE_HEIGHT,
         },
-        .{ .width = 600, .height = 600 },
+        .{ .width = TEXTURE_WIDTH, .height = TEXTURE_HEIGHT },
         u8,
         data,
     );
 
-    // Create a sampler.
     const sampler = gctx.createSampler(.{});
 
     const bind_group_1 = gctx.createBindGroup(bind_group_layout, &.{
@@ -176,18 +151,6 @@ fn create(allocator: std.mem.Allocator, window: *zglfw.Window) !*DemoState {
         },
         .sampler = sampler,
     };
-
-    // Generate mipmaps on the GPU.
-    // const commands = commands: {
-    //     const encoder = gctx.device.createCommandEncoder(null);
-    //     defer encoder.release();
-    //
-    //     gctx.generateMipmaps(arena, encoder, demo.texture);
-    //
-    //     break :commands encoder.finish(null);
-    // };
-    // defer commands.release();
-    // gctx.submit(&.{commands});
 
     // (Async) Create a render pipeline.
     {
@@ -306,7 +269,6 @@ fn draw(demo: *DemoState) void {
         const encoder = gctx.device.createCommandEncoder(null);
         defer encoder.release();
 
-        // Main pass.
         pass: {
             const vb_info = gctx.lookupResourceInfo(demo.vertex_buffer) orelse break :pass;
             const ib_info = gctx.lookupResourceInfo(demo.index_buffer) orelse break :pass;
@@ -319,10 +281,9 @@ fn draw(demo: *DemoState) void {
             const current_texture_view = gctx.lookupResource(current_texture_info.texture_view) orelse break :pass;
             const current_bind_group = gctx.lookupResource(current_texture_info.bind_group) orelse break :pass;
 
-            // const previous_texture_view = gctx.lookupResource(previous_texture_info.texture_view) orelse break :pass;
             const previous_bind_group = gctx.lookupResource(previous_texture_info.bind_group) orelse break :pass;
 
-            // Simple render pass
+            // Game of life render pass
             {
                 const color_attachments = [_]wgpu.RenderPassColorAttachment{.{
                     .view = current_texture_view,
@@ -347,7 +308,7 @@ fn draw(demo: *DemoState) void {
                 const mem = gctx.uniformsAllocate(Uniforms, 1);
                 mem.slice[0] = .{
                     .aspect_ratio = @as(f32, @floatFromInt(fb_width)) / @as(f32, @floatFromInt(fb_height)),
-                    .mip_level = @as(f32, @floatFromInt(demo.mip_level)),
+                    .frag_step = frag_step,
                 };
 
                 pass.setBindGroup(0, previous_bind_group, &.{mem.offset});
@@ -381,7 +342,7 @@ fn draw(demo: *DemoState) void {
                 const mem = gctx.uniformsAllocate(Uniforms, 1);
                 mem.slice[0] = .{
                     .aspect_ratio = @as(f32, @floatFromInt(fb_width)) / @as(f32, @floatFromInt(fb_height)),
-                    .mip_level = @as(f32, @floatFromInt(demo.mip_level)),
+                    .frag_step = frag_step,
                 };
 
                 pass.setBindGroup(0, current_bind_group, &.{mem.offset});
@@ -406,7 +367,7 @@ pub fn main() !void {
 
     zglfw.windowHint(.client_api, .no_api);
 
-    const window = try zglfw.Window.create(600, 600, "Smooth Life", null);
+    const window = try zglfw.Window.create(TEXTURE_WIDTH, TEXTURE_HEIGHT, "Smooth Life", null);
     defer window.destroy();
     window.setSizeLimits(400, 400, -1, -1);
 
@@ -424,28 +385,41 @@ pub fn main() !void {
     }
 }
 
-fn generate_starting_texture_data(allocator: std.mem.Allocator) ![]u8 {
-    const data = try allocator.alloc(u8, 600 * 600 * 4);
+fn createDataTexture(gctx: *zgpu.GraphicsContext) zgpu.TextureHandle {
+    return gctx.createTexture(.{
+        .usage = .{
+            .texture_binding = true,
+            .copy_dst = true,
+            .render_attachment = true,
+        },
+        .size = .{
+            .width = TEXTURE_WIDTH,
+            .height = TEXTURE_HEIGHT,
+            .depth_or_array_layers = 1,
+        },
+        .format = .rgba8_unorm,
+        // Attachment can't have mip levels
+        // .mip_level_count = math.log2_int(u32, 600) + 1,
+    });
+}
+
+fn generateStartingTextureData(allocator: std.mem.Allocator) ![]u8 {
+    const data = try allocator.alloc([4]u8, TEXTURE_WIDTH * TEXTURE_HEIGHT);
 
     var y: usize = 0;
-    while (y < 600) : (y += 1) {
+    while (y < TEXTURE_HEIGHT) : (y += 1) {
         var x: usize = 0;
-        while (x < 600) : (x += 1) {
-            const offset = (y * 600 + x) * 4;
+        while (x < TEXTURE_WIDTH) : (x += 1) {
+            const intensivity: f32 = if (x >= 200 and x < 400 and y >= 250 and y < 350) 1.0 else 0.0;
 
-            if (x >= 200 and x < 400 and y >= 250 and y < 350) {
-                data[offset] = 255;
-                data[offset + 1] = 0;
-                data[offset + 2] = 0;
-                data[offset + 3] = 255;
-            } else {
-                data[offset] = 0;
-                data[offset + 1] = 0;
-                data[offset + 2] = 0;
-                data[offset + 3] = 255;
-            }
+            data[(y * TEXTURE_WIDTH + x)] = .{
+                @intFromFloat(intensivity * 255.0 + 0.5),
+                0,
+                0,
+                255,
+            };
         }
     }
 
-    return data;
+    return std.mem.sliceAsBytes(data);
 }
