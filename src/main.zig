@@ -120,7 +120,11 @@ fn create(allocator: std.mem.Allocator, window: *zglfw.Window) !*DemoState {
         data,
     );
 
-    const sampler = gctx.createSampler(.{});
+    const sampler = gctx.createSampler(.{
+        // TODO: why it does not work?
+        .address_mode_u = .repeat,
+        .address_mode_v = .repeat,
+    });
 
     const bind_group_1 = gctx.createBindGroup(bind_group_layout, &.{
         .{ .binding = 0, .buffer_handle = gctx.uniforms.buffer, .offset = 0, .size = 256 },
@@ -312,7 +316,6 @@ fn draw(demo: *DemoState) void {
                     .aspect_ratio = @as(f32, @floatFromInt(fb_width)) / @as(f32, @floatFromInt(fb_height)),
                     .frag_step = frag_step,
                 };
-
                 pass.setBindGroup(0, previous_bind_group, &.{mem.offset});
 
                 pass.drawIndexed(6, 1, 0, 0, 0);
