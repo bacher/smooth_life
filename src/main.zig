@@ -29,10 +29,13 @@ const wgsl_simple_vs =
     \\  }
 ;
 const wgsl_simple_fs =
+    \\  @group(0) @binding(1) var image: texture_2d<f32>;
+    \\  @group(0) @binding(2) var image_sampler: sampler;
     \\  @fragment fn main(
     \\      @location(0) uv: vec2<f32>,
     \\  ) -> @location(0) vec4<f32> {
-    \\      return vec4(1.0, 0.0, 0.0, 1.0);
+    \\      // return vec4(1.0, 0.0, 0.0, 1.0);
+    \\      return textureSample(image, image_sampler, uv) + 0.002;
     \\  }
 ;
 // zig fmt: on
@@ -86,19 +89,22 @@ const DemoState = struct {
     gctx: *zgpu.GraphicsContext,
 
     simple_pipeline: zgpu.RenderPipelineHandle = .{},
-    simple_bind_group: zgpu.BindGroupHandle,
-
     pipeline: zgpu.RenderPipelineHandle = .{},
-    bind_group: zgpu.BindGroupHandle,
 
     vertex_buffer: zgpu.BufferHandle,
     index_buffer: zgpu.BufferHandle,
 
-    texture: zgpu.TextureHandle,
-    texture_view: zgpu.TextureViewHandle,
+    textures: [2]struct {
+        bind_group: zgpu.BindGroupHandle,
+        texture: zgpu.TextureHandle,
+        texture_view: zgpu.TextureViewHandle,
+    },
+
     sampler: zgpu.SamplerHandle,
 
     mip_level: i32 = 0,
+
+    current_frame: u32 = 0,
 };
 
 fn create(allocator: std.mem.Allocator, window: *zglfw.Window) !*DemoState {
@@ -123,11 +129,6 @@ fn create(allocator: std.mem.Allocator, window: *zglfw.Window) !*DemoState {
     // defer arena_state.deinit();
     // const arena = arena_state.allocator();
 
-    const simple_bind_group_layout = gctx.createBindGroupLayout(&.{
-        zgpu.bufferEntry(0, .{ .vertex = true, .fragment = true }, .uniform, true, 0),
-    });
-    defer gctx.releaseResource(simple_bind_group_layout);
-
     const bind_group_layout = gctx.createBindGroupLayout(&.{
         zgpu.bufferEntry(0, .{ .vertex = true, .fragment = true }, .uniform, true, 0),
         zgpu.textureEntry(1, .{ .fragment = true }, .float, .tvdim_2d, false),
@@ -137,10 +138,10 @@ fn create(allocator: std.mem.Allocator, window: *zglfw.Window) !*DemoState {
 
     // Create a vertex buffer.
     const vertex_data = [_]Vertex{
-        .{ .position = [2]f32{ -0.9, 0.9 }, .uv = [2]f32{ 0.0, 0.0 } },
-        .{ .position = [2]f32{ 0.9, 0.9 }, .uv = [2]f32{ 1.0, 0.0 } },
-        .{ .position = [2]f32{ 0.9, -0.9 }, .uv = [2]f32{ 1.0, 1.0 } },
-        .{ .position = [2]f32{ -0.9, -0.9 }, .uv = [2]f32{ 0.0, 1.0 } },
+        .{ .position = [2]f32{ -0.99, 0.99 }, .uv = [2]f32{ 0.0, 0.0 } },
+        .{ .position = [2]f32{ 0.99, 0.99 }, .uv = [2]f32{ 1.0, 0.0 } },
+        .{ .position = [2]f32{ 0.99, -0.99 }, .uv = [2]f32{ 1.0, 1.0 } },
+        .{ .position = [2]f32{ -0.99, -0.99 }, .uv = [2]f32{ 0.0, 1.0 } },
     };
     const vertex_buffer = gctx.createBuffer(.{
         .usage = .{ .copy_dst = true, .vertex = true },
@@ -156,8 +157,8 @@ fn create(allocator: std.mem.Allocator, window: *zglfw.Window) !*DemoState {
     });
     gctx.queue.writeBuffer(gctx.lookupResource(index_buffer).?, 0, u16, index_data[0..]);
 
-    // Create a texture.
-    const texture = gctx.createTexture(.{
+    // Create a texture 1.
+    const texture_1 = gctx.createTexture(.{
         .usage = .{
             .texture_binding = true,
             .copy_dst = true,
@@ -172,7 +173,25 @@ fn create(allocator: std.mem.Allocator, window: *zglfw.Window) !*DemoState {
         // Attachment can't have mip levels
         // .mip_level_count = math.log2_int(u32, 600) + 1,
     });
-    const texture_view = gctx.createTextureView(texture, .{});
+    const texture_view_1 = gctx.createTextureView(texture_1, .{});
+
+    // Create a texture 2.
+    const texture_2 = gctx.createTexture(.{
+        .usage = .{
+            .texture_binding = true,
+            .copy_dst = true,
+            .render_attachment = true,
+        },
+        .size = .{
+            .width = 600,
+            .height = 600,
+            .depth_or_array_layers = 1,
+        },
+        .format = .bgra8_unorm,
+        // Attachment can't have mip levels
+        // .mip_level_count = math.log2_int(u32, 600) + 1,
+    });
+    const texture_view_2 = gctx.createTextureView(texture_2, .{});
 
     // gctx.queue.writeTexture(
     //     .{ .texture = gctx.lookupResource(texture).? },
@@ -188,25 +207,35 @@ fn create(allocator: std.mem.Allocator, window: *zglfw.Window) !*DemoState {
     // Create a sampler.
     const sampler = gctx.createSampler(.{});
 
-    const simple_bind_group = gctx.createBindGroup(simple_bind_group_layout, &.{
+    const bind_group_1 = gctx.createBindGroup(bind_group_layout, &.{
         .{ .binding = 0, .buffer_handle = gctx.uniforms.buffer, .offset = 0, .size = 256 },
+        .{ .binding = 1, .texture_view_handle = texture_view_1 },
+        .{ .binding = 2, .sampler_handle = sampler },
     });
 
-    const bind_group = gctx.createBindGroup(bind_group_layout, &.{
+    const bind_group_2 = gctx.createBindGroup(bind_group_layout, &.{
         .{ .binding = 0, .buffer_handle = gctx.uniforms.buffer, .offset = 0, .size = 256 },
-        .{ .binding = 1, .texture_view_handle = texture_view },
+        .{ .binding = 1, .texture_view_handle = texture_view_2 },
         .{ .binding = 2, .sampler_handle = sampler },
     });
 
     const demo = try allocator.create(DemoState);
     demo.* = .{
         .gctx = gctx,
-        .simple_bind_group = simple_bind_group,
-        .bind_group = bind_group,
         .vertex_buffer = vertex_buffer,
         .index_buffer = index_buffer,
-        .texture = texture,
-        .texture_view = texture_view,
+        .textures = .{
+            .{
+                .bind_group = bind_group_1,
+                .texture = texture_1,
+                .texture_view = texture_view_1,
+            },
+            .{
+                .bind_group = bind_group_2,
+                .texture = texture_2,
+                .texture_view = texture_view_2,
+            },
+        },
         .sampler = sampler,
     };
 
@@ -224,13 +253,6 @@ fn create(allocator: std.mem.Allocator, window: *zglfw.Window) !*DemoState {
 
     // (Async) Create a render pipeline.
     {
-        // simple
-        const simple_pipeline_layout = gctx.createPipelineLayout(&.{
-            simple_bind_group_layout,
-        });
-        defer gctx.releaseResource(simple_pipeline_layout);
-
-        // regular
         const pipeline_layout = gctx.createPipelineLayout(&.{
             bind_group_layout,
         });
@@ -280,7 +302,7 @@ fn create(allocator: std.mem.Allocator, window: *zglfw.Window) !*DemoState {
 
             gctx.createRenderPipelineAsync(
                 allocator,
-                simple_pipeline_layout,
+                pipeline_layout,
                 pipeline_descriptor,
                 &demo.simple_pipeline,
             );
@@ -349,14 +371,20 @@ fn draw(demo: *DemoState) void {
             const ib_info = gctx.lookupResourceInfo(demo.index_buffer) orelse break :pass;
             const simple_pipeline = gctx.lookupResource(demo.simple_pipeline) orelse break :pass;
             const pipeline = gctx.lookupResource(demo.pipeline) orelse break :pass;
-            const simple_bind_group = gctx.lookupResource(demo.simple_bind_group) orelse break :pass;
-            const bind_group = gctx.lookupResource(demo.bind_group) orelse break :pass;
-            const texture_view = gctx.lookupResource(demo.texture_view) orelse break :pass;
+
+            const current_texture_info = demo.textures[demo.current_frame % 2];
+            const previous_texture_info = demo.textures[1 - demo.current_frame % 2];
+
+            const current_texture_view = gctx.lookupResource(current_texture_info.texture_view) orelse break :pass;
+            const current_bind_group = gctx.lookupResource(current_texture_info.bind_group) orelse break :pass;
+
+            // const previous_texture_view = gctx.lookupResource(previous_texture_info.texture_view) orelse break :pass;
+            const previous_bind_group = gctx.lookupResource(previous_texture_info.bind_group) orelse break :pass;
 
             // Simple render pass
             {
                 const color_attachments = [_]wgpu.RenderPassColorAttachment{.{
-                    .view = texture_view,
+                    .view = current_texture_view,
                     .load_op = .clear,
                     .store_op = .store,
                 }};
@@ -381,7 +409,7 @@ fn draw(demo: *DemoState) void {
                     .mip_level = @as(f32, @floatFromInt(demo.mip_level)),
                 };
 
-                pass.setBindGroup(0, simple_bind_group, &.{mem.offset});
+                pass.setBindGroup(0, previous_bind_group, &.{mem.offset});
 
                 pass.drawIndexed(6, 1, 0, 0, 0);
             }
@@ -415,7 +443,7 @@ fn draw(demo: *DemoState) void {
                     .mip_level = @as(f32, @floatFromInt(demo.mip_level)),
                 };
 
-                pass.setBindGroup(0, bind_group, &.{mem.offset});
+                pass.setBindGroup(0, current_bind_group, &.{mem.offset});
 
                 pass.drawIndexed(6, 1, 0, 0, 0);
             }
@@ -427,6 +455,8 @@ fn draw(demo: *DemoState) void {
 
     gctx.submit(&.{commands});
     _ = gctx.present();
+
+    demo.current_frame += 1;
 }
 
 pub fn main() !void {
