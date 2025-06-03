@@ -4,6 +4,39 @@ const zglfw = @import("zglfw");
 const zgpu = @import("zgpu");
 const wgpu = zgpu.wgpu;
 
+// WGSL Simple shader
+// zig fmt: off
+const wgsl_simple_vs =
+    \\  struct Uniforms {
+    \\      aspect_ratio: f32,
+    \\      mip_level: f32,
+    \\  }
+    \\  @group(0) @binding(0) var<uniform> uniforms: Uniforms;
+    \\
+    \\  struct VertexOut {
+    \\      @builtin(position) position_clip: vec4<f32>,
+    \\      @location(0) uv: vec2<f32>,
+    \\  }
+    \\  @vertex fn main(
+    \\      @location(0) position: vec2<f32>,
+    \\      @location(1) uv: vec2<f32>,
+    \\  ) -> VertexOut {
+    \\      let p = vec2(position.x / uniforms.aspect_ratio, position.y);
+    \\      var output: VertexOut;
+    \\      output.position_clip = vec4(p, 0.0, 1.0);
+    \\      output.uv = uv;
+    \\      return output;
+    \\  }
+;
+const wgsl_simple_fs =
+    \\  @fragment fn main(
+    \\      @location(0) uv: vec2<f32>,
+    \\  ) -> @location(0) vec4<f32> {
+    \\      return vec4(1.0, 0.0, 0.0, 1.0);
+    \\  }
+;
+// zig fmt: on
+
 // zig fmt: off
 const wgsl_common =
 \\  struct Uniforms {
@@ -36,8 +69,8 @@ const wgsl_fs = wgsl_common ++
     \\  ) -> @location(0) vec4<f32> {
     \\      return textureSampleLevel(image, image_sampler, uv, uniforms.mip_level);
     \\  }
-// zig fmt: on
 ;
+// zig fmt: on
 
 const Vertex = extern struct {
     position: [2]f32,
@@ -54,6 +87,8 @@ const DemoState = struct {
 
     pipeline: zgpu.RenderPipelineHandle = .{},
     bind_group: zgpu.BindGroupHandle,
+
+    simple_pipeline: zgpu.RenderPipelineHandle = .{},
 
     vertex_buffer: zgpu.BufferHandle,
     index_buffer: zgpu.BufferHandle,
@@ -117,14 +152,19 @@ fn create(allocator: std.mem.Allocator, window: *zglfw.Window) !*DemoState {
 
     // Create a texture.
     const texture = gctx.createTexture(.{
-        .usage = .{ .texture_binding = true, .copy_dst = true },
+        .usage = .{
+            .texture_binding = true,
+            .copy_dst = true,
+            .render_attachment = true,
+        },
         .size = .{
             .width = 600,
             .height = 600,
             .depth_or_array_layers = 1,
         },
         .format = .bgra8_unorm,
-        .mip_level_count = math.log2_int(u32, 600) + 1,
+        // Attachment can't have mip levels
+        // .mip_level_count = math.log2_int(u32, 600) + 1,
     });
     const texture_view = gctx.createTextureView(texture, .{});
 
@@ -178,12 +218,6 @@ fn create(allocator: std.mem.Allocator, window: *zglfw.Window) !*DemoState {
         });
         defer gctx.releaseResource(pipeline_layout);
 
-        const vs_module = zgpu.createWgslShaderModule(gctx.device, wgsl_vs, "vs");
-        defer vs_module.release();
-
-        const fs_module = zgpu.createWgslShaderModule(gctx.device, wgsl_fs, "fs");
-        defer fs_module.release();
-
         const color_targets = [_]wgpu.ColorTargetState{.{
             .format = zgpu.GraphicsContext.swapchain_format,
         }};
@@ -198,33 +232,75 @@ fn create(allocator: std.mem.Allocator, window: *zglfw.Window) !*DemoState {
             .attributes = &vertex_attributes,
         }};
 
-        // Create a render pipeline.
-        const pipeline_descriptor = wgpu.RenderPipelineDescriptor{
-            .vertex = .{
-                .module = vs_module,
-                .entry_point = "main",
-                .buffer_count = vertex_buffers.len,
-                .buffers = &vertex_buffers,
-            },
-            .primitive = .{
-                .front_face = .cw,
-                .cull_mode = .back,
-                .topology = .triangle_list,
-            },
-            .fragment = &.{
-                .module = fs_module,
-                .entry_point = "main",
-                .target_count = color_targets.len,
-                .targets = &color_targets,
-            },
-        };
+        { // Create a simple render pipeline.
+            const vs_module = zgpu.createWgslShaderModule(gctx.device, wgsl_simple_vs, "vs");
+            defer vs_module.release();
 
-        gctx.createRenderPipelineAsync(
-            allocator,
-            pipeline_layout,
-            pipeline_descriptor,
-            &demo.pipeline,
-        );
+            const fs_module = zgpu.createWgslShaderModule(gctx.device, wgsl_simple_fs, "fs");
+            defer fs_module.release();
+
+            const pipeline_descriptor = wgpu.RenderPipelineDescriptor{
+                .vertex = .{
+                    .module = vs_module,
+                    .entry_point = "main",
+                    .buffer_count = vertex_buffers.len,
+                    .buffers = &vertex_buffers,
+                },
+                .primitive = .{
+                    .front_face = .cw,
+                    .cull_mode = .back,
+                    .topology = .triangle_list,
+                },
+                .fragment = &.{
+                    .module = fs_module,
+                    .entry_point = "main",
+                    .target_count = color_targets.len,
+                    .targets = &color_targets,
+                },
+            };
+
+            gctx.createRenderPipelineAsync(
+                allocator,
+                pipeline_layout,
+                pipeline_descriptor,
+                &demo.simple_pipeline,
+            );
+        }
+
+        { // Create a final render pipeline.
+            const vs_module = zgpu.createWgslShaderModule(gctx.device, wgsl_vs, "vs");
+            defer vs_module.release();
+
+            const fs_module = zgpu.createWgslShaderModule(gctx.device, wgsl_fs, "fs");
+            defer fs_module.release();
+
+            const pipeline_descriptor = wgpu.RenderPipelineDescriptor{
+                .vertex = .{
+                    .module = vs_module,
+                    .entry_point = "main",
+                    .buffer_count = vertex_buffers.len,
+                    .buffers = &vertex_buffers,
+                },
+                .primitive = .{
+                    .front_face = .cw,
+                    .cull_mode = .back,
+                    .topology = .triangle_list,
+                },
+                .fragment = &.{
+                    .module = fs_module,
+                    .entry_point = "main",
+                    .target_count = color_targets.len,
+                    .targets = &color_targets,
+                },
+            };
+
+            gctx.createRenderPipelineAsync(
+                allocator,
+                pipeline_layout,
+                pipeline_descriptor,
+                &demo.pipeline,
+            );
+        }
     }
 
     return demo;
@@ -251,36 +327,77 @@ fn draw(demo: *DemoState) void {
         pass: {
             const vb_info = gctx.lookupResourceInfo(demo.vertex_buffer) orelse break :pass;
             const ib_info = gctx.lookupResourceInfo(demo.index_buffer) orelse break :pass;
+            const simple_pipeline = gctx.lookupResource(demo.simple_pipeline) orelse break :pass;
             const pipeline = gctx.lookupResource(demo.pipeline) orelse break :pass;
             const bind_group = gctx.lookupResource(demo.bind_group) orelse break :pass;
+            const texture_view = gctx.lookupResource(demo.texture_view) orelse break :pass;
 
-            const color_attachments = [_]wgpu.RenderPassColorAttachment{.{
-                .view = back_buffer_view,
-                .load_op = .clear,
-                .store_op = .store,
-            }};
-            const render_pass_info = wgpu.RenderPassDescriptor{
-                .color_attachment_count = color_attachments.len,
-                .color_attachments = &color_attachments,
-            };
-            const pass = encoder.beginRenderPass(render_pass_info);
-            defer {
-                pass.end();
-                pass.release();
+            // Simple render pass
+            {
+                const color_attachments = [_]wgpu.RenderPassColorAttachment{.{
+                    .view = texture_view,
+                    .load_op = .clear,
+                    .store_op = .store,
+                }};
+                const render_pass_info = wgpu.RenderPassDescriptor{
+                    .color_attachment_count = color_attachments.len,
+                    .color_attachments = &color_attachments,
+                };
+                const pass = encoder.beginRenderPass(render_pass_info);
+                defer {
+                    pass.end();
+                    pass.release();
+                }
+
+                pass.setVertexBuffer(0, vb_info.gpuobj.?, 0, vb_info.size);
+                pass.setIndexBuffer(ib_info.gpuobj.?, .uint16, 0, ib_info.size);
+
+                pass.setPipeline(simple_pipeline);
+
+                const mem = gctx.uniformsAllocate(Uniforms, 1);
+                mem.slice[0] = .{
+                    .aspect_ratio = @as(f32, @floatFromInt(fb_width)) / @as(f32, @floatFromInt(fb_height)),
+                    .mip_level = @as(f32, @floatFromInt(demo.mip_level)),
+                };
+
+                pass.setBindGroup(0, bind_group, &.{mem.offset});
+
+                pass.drawIndexed(6, 1, 0, 0, 0);
             }
 
-            pass.setVertexBuffer(0, vb_info.gpuobj.?, 0, vb_info.size);
-            pass.setIndexBuffer(ib_info.gpuobj.?, .uint16, 0, ib_info.size);
+            // Final render pass
+            {
+                const color_attachments = [_]wgpu.RenderPassColorAttachment{.{
+                    .view = back_buffer_view,
+                    .load_op = .clear,
+                    .store_op = .store,
+                }};
+                const render_pass_info = wgpu.RenderPassDescriptor{
+                    .color_attachment_count = color_attachments.len,
+                    .color_attachments = &color_attachments,
+                };
 
-            pass.setPipeline(pipeline);
+                const pass = encoder.beginRenderPass(render_pass_info);
+                defer {
+                    pass.end();
+                    pass.release();
+                }
 
-            const mem = gctx.uniformsAllocate(Uniforms, 1);
-            mem.slice[0] = .{
-                .aspect_ratio = @as(f32, @floatFromInt(fb_width)) / @as(f32, @floatFromInt(fb_height)),
-                .mip_level = @as(f32, @floatFromInt(demo.mip_level)),
-            };
-            pass.setBindGroup(0, bind_group, &.{mem.offset});
-            pass.drawIndexed(6, 1, 0, 0, 0);
+                pass.setVertexBuffer(0, vb_info.gpuobj.?, 0, vb_info.size);
+                pass.setIndexBuffer(ib_info.gpuobj.?, .uint16, 0, ib_info.size);
+
+                pass.setPipeline(pipeline);
+
+                const mem = gctx.uniformsAllocate(Uniforms, 1);
+                mem.slice[0] = .{
+                    .aspect_ratio = @as(f32, @floatFromInt(fb_width)) / @as(f32, @floatFromInt(fb_height)),
+                    .mip_level = @as(f32, @floatFromInt(demo.mip_level)),
+                };
+
+                pass.setBindGroup(0, bind_group, &.{mem.offset});
+
+                pass.drawIndexed(6, 1, 0, 0, 0);
+            }
         }
 
         break :commands encoder.finish(null);
