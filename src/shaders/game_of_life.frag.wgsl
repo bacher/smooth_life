@@ -17,30 +17,49 @@ struct Uniforms {
 
     let texture_size = textureDimensions(image, 0);
 
-    let x = u32(uv.x * f32(texture_size.x));
-    let y = u32(uv.y * f32(texture_size.y));
+    let center_x = i32(uv.x * f32(texture_size.x));
+    let center_y = i32(uv.y * f32(texture_size.y));
 
-    // let cell = textureSample(image, image_sampler, uv).r;
-    let cell = textureLoad(image, vec2(x, y), 0).r;
+    let center_cell_value = textureLoad(image, vec2(center_x, center_y), 0).r;
 
-    let neighbours =
-        // textureSample(image, image_sampler, uv + vec2(-step_x, -step_y)).r +
-        textureLoad(image, vec2(x - 1, y - 1), 0).r +
-        textureLoad(image, vec2(x,     y - 1), 0).r +
-        textureLoad(image, vec2(x + 1, y - 1), 0).r +
-        textureLoad(image, vec2(x - 1, y    ), 0).r +
-        textureLoad(image, vec2(x + 1, y    ), 0).r +
-        textureLoad(image, vec2(x - 1, y + 1), 0).r +
-        textureLoad(image, vec2(x,     y + 1), 0).r +
-        textureLoad(image, vec2(x + 1, y + 1), 0).r;
+    var outer_sum: f32 = 0.0;
+    var outer_count: u32 = 0;
+    var inner_sum: f32 = 0.0;
+    var inner_count: u32 = 0;
+
+    for (var y = -12; y <= 12; y += 1) {
+        for (var x = -12; x <= 12; x += 1) {
+            let cell_value = textureLoad(image, vec2(center_x + x, center_y + y), 0).r;
+
+            let x_float = f32(x);
+            let y_float = f32(y);
+            let distance_2: f32 = x_float * x_float + y_float * y_float;
+
+            if (x == 0 && y == 0) {
+                continue;
+            } else if (distance_2 <= 16.0) {
+                inner_sum += cell_value;
+                inner_count += 1;
+            } else if (distance_2 <= 144.0) {
+                outer_sum += cell_value;
+                outer_count += 1;
+            }
+        }
+    }
+
+    let inner = inner_sum / f32(inner_count);
+    let outer = outer_sum / f32(outer_count);
+
+    var change = -0.25;
+    if (
+        (inner < 0.5 && outer >= 0.25 && outer < 0.33) ||
+        (inner >= 0.5 && outer >= 0.35 && outer < 0.51)
+    ) {
+        change = 0.25;
+    }
 
     return vec4(
-        select(
-            0.0,
-            1.0,
-            (cell == 0.0 && neighbours == 3.0) ||
-            (cell == 1.0 && neighbours >= 2.0 && neighbours <= 3.0)
-            ),
+        center_cell_value + change,
         0.0,
         0.0,
         1.0,

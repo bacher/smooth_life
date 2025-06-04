@@ -410,12 +410,14 @@ fn createDataTexture(gctx: *zgpu.GraphicsContext) zgpu.TextureHandle {
 
 fn generateStartingTextureData(allocator: std.mem.Allocator) ![]u8 {
     const data = try allocator.alloc([4]u8, TEXTURE_WIDTH * TEXTURE_HEIGHT);
+    var prng = std.Random.DefaultPrng.init(12345);
+    const rand = prng.random();
 
     var y: usize = 0;
     while (y < TEXTURE_HEIGHT) : (y += 1) {
         var x: usize = 0;
         while (x < TEXTURE_WIDTH) : (x += 1) {
-            const intensivity: f32 = if (x >= 200 and x < 400 and y >= 250 and y < 350) 1.0 else 0.0;
+            const intensivity: f32 = if (x >= 200 and x < 400 and y >= 250 and y < 350 and rand.boolean()) rand.float(f32) else 0.0;
 
             data[(y * TEXTURE_WIDTH + x)] = .{
                 @intFromFloat(intensivity * 255.0 + 0.5),
@@ -427,4 +429,13 @@ fn generateStartingTextureData(allocator: std.mem.Allocator) ![]u8 {
     }
 
     return std.mem.sliceAsBytes(data);
+}
+
+test "rnd" {
+    var prng = std.Random.DefaultPrng.init(12345);
+    const rand = prng.random();
+
+    const value = rand.float(f32);
+
+    try std.testing.expect(value >= 0.0 and value < 1.0);
 }
