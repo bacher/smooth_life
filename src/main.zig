@@ -410,7 +410,18 @@ fn createDataTexture(gctx: *zgpu.GraphicsContext) zgpu.TextureHandle {
 
 fn generateStartingTextureData(allocator: std.mem.Allocator) ![]u8 {
     const data = try allocator.alloc([4]u8, TEXTURE_WIDTH * TEXTURE_HEIGHT);
-    var prng = std.Random.DefaultPrng.init(12345);
+
+    const seed: u64 = 12345;
+    // const seed = seed: {
+    //     var seed: u64 = undefined;
+    //     try std.posix.getrandom(std.mem.asBytes(&seed));
+    //     break :seed seed;
+    // };
+    // const seed = std.crypto.random.int(u64);
+
+    std.debug.print("Seed: {d}\n", .{seed});
+
+    var prng = std.Random.DefaultPrng.init(seed);
     const rand = prng.random();
 
     var y: usize = 0;

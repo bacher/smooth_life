@@ -16,6 +16,7 @@ struct Uniforms {
     // let step_y = uniforms.frag_step.y;
 
     let texture_size = textureDimensions(image, 0);
+    let texture_size_i32 = vec2(i32(texture_size.x), i32(texture_size.y));
 
     let center_x = i32(uv.x * f32(texture_size.x));
     let center_y = i32(uv.y * f32(texture_size.y));
@@ -29,7 +30,10 @@ struct Uniforms {
 
     for (var y = -12; y <= 12; y += 1) {
         for (var x = -12; x <= 12; x += 1) {
-            let cell_value = textureLoad(image, vec2(center_x + x, center_y + y), 0).r;
+            let cell_x = modulo(center_x + x, texture_size_i32.x);
+            let cell_y = modulo(center_y + y, texture_size_i32.y);
+
+            let cell_value = textureLoad(image, vec2(cell_x, cell_y), 0).r;
 
             let x_float = f32(x);
             let y_float = f32(y);
@@ -64,4 +68,14 @@ struct Uniforms {
         0.0,
         1.0,
     );
+}
+
+fn modulo(a: i32, b: i32) -> i32 {
+    if (a < 0) {
+        return a + b;
+    }
+    if (a > b) {
+        return a - b;
+    }
+    return a;
 }
