@@ -10,7 +10,6 @@ struct Uniforms {
 @fragment fn main(
     @location(0) uv: vec2<f32>,
 ) -> @location(0) vec4<f32> {
-    // dpdx and dpdy work only when window size equals to the texture size.
     // let step_x = dpdx(uv.x);
     // let step_y = dpdy(uv.y);
     // let step_x = uniforms.frag_step.x;
