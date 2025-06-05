@@ -8,6 +8,7 @@ struct Uniforms {
 @group(0) @binding(2) var image_sampler: sampler;
 
 @fragment fn main(
+    @builtin(position) frag_coord: vec4f,
     @location(0) uv: vec2<f32>,
 ) -> @location(0) vec4<f32> {
     // let step_x = dpdx(uv.x);
@@ -18,8 +19,10 @@ struct Uniforms {
     let texture_size = textureDimensions(image, 0);
     let texture_size_i32 = vec2(i32(texture_size.x), i32(texture_size.y));
 
-    let center_x = i32(uv.x * f32(texture_size.x));
-    let center_y = i32(uv.y * f32(texture_size.y));
+    // let center_x = i32(uv.x * f32(texture_size.x));
+    // let center_y = i32(uv.y * f32(texture_size.y));
+    let center_x = i32(frag_coord.x);
+    let center_y = i32(frag_coord.y);
 
     let center_cell_value = textureLoad(image, vec2(center_x, center_y), 0).r;
 
